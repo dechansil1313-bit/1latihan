@@ -1,16 +1,11 @@
 import { Elysia } from "elysia";
-import { db } from "./db";
-import { users } from "./db/schema";
+import { authRoutes } from "./routes/auth";
+import { cookie } from "@elysiajs/cookie";
 
 const app = new Elysia()
+  .use(cookie())
   .get("/", () => "Hello Elysia")
-  .get("/users", async () => {
-    try {
-      return await db.select().from(users);
-    } catch (error) {
-      return { error: "Database connection failed. Please check your .env file." };
-    }
-  })
+  .use(authRoutes)
   .listen(3000);
 
 console.log(
