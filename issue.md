@@ -26,5 +26,10 @@ This issue outlines the implementation of session-based authentication using Ely
   - Create migration using `drizzle db push`.
 
 ## References
-- Implementation plan: `docs/implementation_plan.md`
-- Feature Documentation: `docs/session_auth_feature.md`
+- **Step-by-Step Implementation Plan**: [docs/implementation_plan.md](https://github.com/dechansil1313-bit/1latihan/blob/main/docs/implementation_plan.md)
+- **Database Schema Documentation**: [docs/database.md](https://github.com/dechansil1313-bit/1latihan/blob/main/docs/database.md)
+- **API Endpoints Documentation**: [docs/api.md](https://github.com/dechansil1313-bit/1latihan/blob/main/docs/api.md)
+- **Session Authentication Flow**: [docs/auth.md](https://github.com/dechansil1313-bit/1latihan/blob/main/docs/auth.md)
+- **Session Auth Feature Guide**: [docs/session_auth_feature.md](https://github.com/dechansil1313-bit/1latihan/blob/main/docs/session_auth_feature.md)
+- **Active Database Schema File**: [src/db/schema.ts](https://github.com/dechansil1313-bit/1latihan/blob/main/src/db/schema.ts)
+
