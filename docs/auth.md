@@ -1,43 +1,84 @@
-# Authentication Documentation
+# Authentication Documentation (Session-Based Auth)
 
-This application uses a strict **Session-Based Authentication** mechanism. We explicitly avoid stateless Token-Based auth (like JWTs stored in local storage) in favor of secure, server-managed sessions stored via HTTP-only cookies.
+This application uses a strict **Session-Based Authentication** mechanism. We explicitly avoid stateless Token-Based auth (like JWTs stored in browser localStorage or sessionStorage) in favor of secure, server-managed sessions stored in the database and matched against secure `HttpOnly` client-side cookies.
 
-## Core Concepts
+---
 
-1. **Password Hashing**
-   - We use `bcryptjs` for hashing user passwords before storing them in the `users` table.
-   - Passwords are **never** stored in plain text.
-   - When verifying a login attempt, the plain text input is compared against the stored hash using `bcrypt.compare`.
+## 🔒 Session-Based vs. Token-Based Auth
 
-2. **Session Mechanism**
-   - Upon successful login, the server creates a unique session identifier (or an encrypted session cookie payload if using a secure cookie plugin).
-   - This session data contains the `user_id` to identify the user on subsequent requests.
-   - ElysiaJS session/cookie mechanisms are used to handle parsing and sending the cookie.
+| Feature | Session-Based Auth (Our Choice) | Token-Based Auth (Stateless JWT) |
+| :--- | :--- | :--- |
+| **Session State** | Stored on the Server (Database `session` table) | Stored on the Client (Encrypted in JWT payload) |
+| **Client Storage** | Secure, browser-protected `HttpOnly` Cookie | Usually `localStorage` or `sessionStorage` |
+| **XSS Vulnerability** | **Extremely Low** (JavaScript cannot access HttpOnly cookies) | **High** (If JavaScript is compromised, tokens are stolen) |
+| **Revocation** | **Instant** (Simply delete the session from the database) | **Difficult** (JWT remains valid until its natural expiration) |
+| **Cookie Flags** | `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/` | N/A or standard client-side header inclusion |
 
-3. **Cookie Security**
-   - Cookies must be set with the following flags:
-     - `HttpOnly: true` -> Prevents client-side scripts (JavaScript) from accessing the cookie, mitigating XSS attacks.
-     - `Secure: true` -> Ensures cookies are only sent over HTTPS (can be false in local development).
-     - `SameSite: 'strict'` or `'lax'` -> Mitigates Cross-Site Request Forgery (CSRF) attacks.
+---
 
-## Auth Flows
+## ⚙️ Core Components
 
-### 1. Registration (`POST /api/register`)
-- Validates the requested `username`, `email`, and `password`.
-- Hashes the `password` using `bcryptjs`.
-- Inserts the new user into the database.
-- (Optional) Automatically logs the user in by establishing a session.
+### 1. The `session` Table
+Rather than trusting a client-signed token blindly, the server holds a registry of active, valid sessions in the `session` table. Each session contains:
+- `token`: A highly-secure, cryptographically random UUID.
+- `user_id`: The ID of the authenticated user.
+- `expired_at`: A timestamp after which the session is no longer recognized as valid.
 
-### 2. Login (`POST /api/login`)
-- Validates the presence of `email` and `password`.
-- Retrieves the user record by `email`.
-- Verifies the given `password` against the stored `bcrypt` hash.
-- On success, sets the session cookie with the user's ID.
+### 2. Secure Cookie Configuration
+When a user logs in, the session token is sent to the browser via the `Set-Cookie` header with these strict security properties:
+- **`HttpOnly`**: The browser blocks JavaScript from accessing the cookie (`document.cookie` is empty). This completely eliminates the threat of token theft via Cross-Site Scripting (XSS) attacks.
+- **`Secure`**: The browser only sends the cookie over encrypted HTTPS connections (should be disabled for local development if not using local SSL).
+- **`SameSite=Strict`**: The browser never sends the cookie on cross-site requests. This mitigates Cross-Site Request Forgery (CSRF) attacks.
+- **`Path=/`**: The cookie is valid for all routes on the domain.
 
-### 3. Logout (`POST /api/logout`)
-- Instructs the client browser to clear the session cookie (e.g., setting the expiration date to the past).
+---
 
-### 4. Authenticated Requests (e.g., `GET /api/users/me`)
-- The server automatically reads the session cookie attached to the incoming request.
-- If the cookie is valid and contains a user ID, the request is authorized.
-- If the cookie is missing or invalid, the server responds with a `401 Unauthorized` error.
+## 🔄 Authentication Flows
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Server (ElysiaJS)
+    participant Database (MySQL)
+
+    Note over Client, Server: Login Flow
+    Client->>Server: POST /api/user/login (email, password)
+    Server->>Database: Query user by email
+    Database-->>Server: Return user records & password hash
+    Server->>Server: Verify bcrypt hash
+    Server->>Server: Generate UUID token & expired_at date
+    Server->>Database: Insert session (token, user_id, expired_at)
+    Database-->>Server: Success
+    Server-->>Client: Set-Cookie: token=[UUID] (HttpOnly) & 200 OK Response
+
+    Note over Client, Server: Authenticated Request Flow
+    Client->>Server: GET /api/users/me (Sends cookie: token=[UUID] automatically)
+    Server->>Database: Query session where token = [UUID] & expired_at > NOW()
+    Database-->>Server: Session found (user_id = 1)
+    Server->>Database: Query user by id = 1
+    Database-->>Server: Return User details
+    Server-->>Client: Return User Profile & 200 OK
+
+    Note over Client, Server: Logout Flow
+    Client->>Server: POST /api/user/logout (email, password)
+    Server->>Database: Query user & Verify password
+    Server->>Database: DELETE FROM session WHERE user_id = user.id
+    Database-->>Server: Success
+    Server-->>Client: Clear Cookie (expire in past) & 200 OK Response
+```
+
+### 1. Login Flow (`POST /api/user/login`)
+1. User submits `email` and `password` (or attempts Gmail login).
+2. Server verifies the identity of the user.
+3. Server generates a session `token` (UUID) and sets the `expired_at` timestamp.
+4. Server inserts the record into the `session` table.
+5. Server attaches the `token` in an `HttpOnly` cookie.
+6. Server sends the user details back in the response body.
+
+### 2. Logout Flow (`POST /api/user/logout`)
+1. User sends the credentials `email` and `password` in the body.
+2. Server validates the credentials.
+3. Server deletes the session record from the database `session` table.
+4. Server commands the browser to clear the `token` cookie.
+5. Server sends a successful logout response.
